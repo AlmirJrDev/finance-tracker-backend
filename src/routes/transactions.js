@@ -1,6 +1,6 @@
 const express = require('express')
 const router = express.Router()
-const ctrl = require('../../src/controllers/TransactionController')
+const ctrl = require('../../src/controllers/transactionController')
 const { authenticate } = require('../middleware/auth')
 
 router.use(authenticate)
