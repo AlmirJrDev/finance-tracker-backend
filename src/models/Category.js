@@ -9,7 +9,7 @@ const categorySchema = new mongoose.Schema(
       default: '#6B7280',
       match: /^#[0-9A-Fa-f]{6}$/,
     },
-    icon: { type: String, maxlength: 2 },
+    icon: { type: String, maxlength: 10 },
     description: { type: String, maxlength: 200 },
     isDefault: { type: Boolean, default: false },
     transactionCount: { type: Number, default: 0 },
