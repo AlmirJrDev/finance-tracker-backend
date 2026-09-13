@@ -19,6 +19,18 @@ import summaryRoutes from './routes/summary'
 import budgetRoutes from './routes/budgets'
 import cronRoutes from './routes/cron'
 
+const normalizeOrigin = (o: string) => o.trim().replace(/\/+$/, '').toLowerCase()
+
+/**
+ * FRONTEND_URL aceita "*" (qualquer origem) ou uma lista separada por vírgula.
+ * Barras finais e maiúsculas são ignoradas ("https://app.com/" == "https://app.com").
+ */
+export function corsOrigin(value: string): boolean | ((origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => void) {
+  const allowed = value.split(',').map(normalizeOrigin).filter(Boolean)
+  if (allowed.includes('*')) return true
+  return (origin, cb) => cb(null, !origin || allowed.includes(normalizeOrigin(origin)))
+}
+
 export function createApp() {
   const config = env()
   const app = express()
@@ -28,7 +40,7 @@ export function createApp() {
   app.use(helmet())
   app.use(
     cors({
-      origin: config.FRONTEND_URL.split(',').map((o) => o.trim()),
+      origin: corsOrigin(config.FRONTEND_URL),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     })
