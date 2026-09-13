@@ -6,6 +6,8 @@ const userSchema = new Schema(
     name: { type: String, required: true, trim: true },
     googleId: { type: String, unique: true, sparse: true },
     avatar: { type: String },
+    /** Última vez que o usuário alterou algum dado (só visualizar não conta) */
+    lastActivityAt: { type: Date },
     preferences: {
       timezone: { type: String, default: 'America/Sao_Paulo' },
       currency: { type: String, default: 'BRL' },

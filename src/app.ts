@@ -10,6 +10,7 @@ import { connectDB } from './lib/db'
 import { asyncHandler } from './lib/http'
 import { AppError } from './lib/errors'
 import { authenticate } from './middleware/auth'
+import { trackActivity } from './middleware/activity'
 import { errorHandler } from './middleware/errorHandler'
 import authRoutes from './routes/auth'
 import transactionRoutes from './routes/transactions'
@@ -79,12 +80,12 @@ export function createApp() {
   app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }))
 
   app.use('/api/auth', authRoutes)
-  app.use('/api/transactions', authenticate, transactionRoutes)
-  app.use('/api/categories', authenticate, categoryRoutes)
-  app.use('/api/recurring-transactions', authenticate, recurringRoutes)
+  app.use('/api/transactions', authenticate, trackActivity, transactionRoutes)
+  app.use('/api/categories', authenticate, trackActivity, categoryRoutes)
+  app.use('/api/recurring-transactions', authenticate, trackActivity, recurringRoutes)
   app.use('/api/summary', authenticate, summaryRoutes)
-  app.use('/api/budgets', authenticate, budgetRoutes)
-  app.use('/api/accounts', authenticate, accountRoutes)
+  app.use('/api/budgets', authenticate, trackActivity, budgetRoutes)
+  app.use('/api/accounts', authenticate, trackActivity, accountRoutes)
   app.use('/api/cron', cronRoutes)
 
   app.use((_req, res) => {

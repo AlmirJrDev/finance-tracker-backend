@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { getActiveMonths, getMonthSummary, getYearSummary } from '../services/summary'
 import { getProjection, MAX_PROJECTION_DAYS } from '../services/projection'
+import { getFreshness } from '../services/freshness'
 import { categoryMap } from '../services/categories'
 import { MONTH_RE } from '../lib/dates'
 import { asyncHandler, currentUserId, objectIdSchema, userToday } from '../lib/http'
@@ -20,6 +21,14 @@ async function scopeOf(req: Request): Promise<Scope> {
   if (accountId && !(await Account.exists({ _id: accountId, userId }))) throw notFound('Conta não encontrada')
   return { userId, accountId }
 }
+
+/** Se os dados estão parados (usuário sem lançar há muito tempo). */
+router.get(
+  '/freshness',
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await getFreshness(currentUserId(req)) })
+  })
+)
 
 router.get(
   '/months',

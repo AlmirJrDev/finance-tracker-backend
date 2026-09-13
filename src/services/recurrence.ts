@@ -37,13 +37,13 @@ export function occurrencesInMonth(rule: RecurrenceRule, ym: string): string[] {
 }
 
 /**
- * Status de uma ocorrência gerada: o que já passou conta como pago; o que está por vir fica
- * pendente até o usuário confirmar (ou até a data chegar, se a recorrência confirma sozinha).
+ * Status de uma ocorrência gerada. O app não inventa histórico: sem confirmação automática,
+ * toda ocorrência nasce pendente ("a confirmar"), inclusive as de datas que já passaram
+ * (ex.: geradas enquanto o usuário não usava o app). Com confirmação automática (salário,
+ * débito automático), vira paga quando a data chega.
  */
 export function occurrenceStatus(date: string, today: string, autoConfirm: boolean): TransactionStatus {
-  if (date < today) return 'paid'
-  if (date === today && autoConfirm) return 'paid'
-  return 'pending'
+  return autoConfirm && date <= today ? 'paid' : 'pending'
 }
 
 /**
