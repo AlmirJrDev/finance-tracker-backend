@@ -45,9 +45,12 @@ Todas as rotas, exceto `/health` e `/api/auth/google|dev`, exigem `Authorization
 | POST | `/api/auth/dev` | Login local (só com `ALLOW_DEV_LOGIN=true` fora de produção) |
 | GET | `/api/auth/me` | Usuário logado |
 | PUT | `/api/auth/preferences` | `{ timezone?, currency? }` |
-| GET | `/api/transactions` | Filtros: `month`, `from`, `to`, `type`, `categoryId`, `q`, `sort`, `page`, `limit` (máx. 500) |
+| GET | `/api/transactions` | Filtros: `month`, `from`, `to`, `type`, `status`, `categoryId`, `q`, `sort`, `page`, `limit` (máx. 500) |
 | GET/PUT/DELETE | `/api/transactions/:id` | |
-| POST | `/api/transactions` | `{ date, description, amountCents, type, categoryId?, note? }` |
+| POST | `/api/transactions` | `{ date, description, amountCents, type, status?, categoryId?, note? }` — sem `status`, data futura fica `pending` |
+| POST | `/api/transactions/status` | `{ ids, status }` — altera várias de uma vez |
+| POST | `/api/transactions/installments` | `{ date, description, totalAmountCents, installments (2–72), type?, categoryId?, note? }` |
+| DELETE | `/api/transactions/installments/:groupId` | `?onlyPending=true` mantém as parcelas pagas |
 | GET/POST | `/api/categories` | A lista cria as categorias padrão na primeira vez |
 | PUT/DELETE | `/api/categories/:id` | Remover move as transações para "Outros" |
 | GET/POST | `/api/recurring-transactions` | `?active=true\|false` |
@@ -56,6 +59,18 @@ Todas as rotas, exceto `/health` e `/api/auth/google|dev`, exigem `Authorization
 | GET | `/api/summary/month/:YYYY-MM` | Totais, saldo dia a dia e gastos por categoria |
 | GET | `/api/summary/year/:YYYY` | 12 meses com saldo encadeado |
 | GET | `/api/summary/months` | Meses que têm transações |
+| GET | `/api/summary/projection` | `?days=7..366` (padrão 90): saldo pago hoje, saldo previsto dia a dia, menor saldo, primeira data negativa, atrasadas e próximos 7 dias |
+| GET | `/api/budgets` | `?month=YYYY-MM` (padrão: mês atual): gasto pago, previsto, % e nível (`ok`, `warning`, `exceeded`) |
+| PUT/DELETE | `/api/budgets/:categoryId` | `{ amountCents, alertPercent? }` (alerta padrão em 80%) |
+| GET | `/api/cron/recurring` | Chamado pela Vercel com `Authorization: Bearer $CRON_SECRET` |
+
+## Status, projeção e recorrências automáticas
+
+- Toda transação é `paid` ou `pending`. Documentos antigos sem status contam como pagos.
+- Resumos trazem os totais **previstos** (tudo) e os **pagos** (`paidIncomeCents`, `paidFinalBalanceCents`...).
+- A projeção soma as pendentes e as ocorrências das recorrências ativas que **ainda não foram geradas**, sem contar duas vezes.
+- Ocorrências geradas com data passada nascem pagas; as futuras, pendentes. Com `autoConfirm: true`, viram pagas quando a data chega.
+- O cron diário (`vercel.json`, 09:00 UTC) gera o mês atual e o próximo para todos os usuários e confirma as automáticas. Defina `CRON_SECRET` nas variáveis da Vercel; sem ele o endpoint fica desativado.
 
 ## Migração dos dados antigos (v1 → v2)
 
@@ -64,4 +79,4 @@ npm run migrate:v2                                               # simulação: 
 npm run migrate:v2 -- --apply --remove-duplicates --drop-summaries
 ```
 
-Converte `amount` (Decimal128) → `amountCents`, datas → `YYYY-MM-DD`, `entrada/saída` → `income/expense`, remove campos desnormalizados e a coleção `monthlysummaries`. `--remove-duplicates` apaga as cópias de transações recorrentes geradas pelo bug antigo, mantendo a mais antiga. Faça um backup (snapshot no Atlas) antes de aplicar.
+Converte `amount` (Decimal128) → `amountCents`, datas → `YYYY-MM-DD`, `entrada/saída` → `income/expense`, remove campos desnormalizados e a coleção `monthlysummaries`. `--remove-duplicates` apaga as cópias de transações recorrentes geradas pelo bug antigo, mantendo a mais antiga. Também define o status das transações antigas: até hoje `paid`, datas futuras `pending`. Faça um backup (snapshot no Atlas) antes de aplicar.

@@ -16,6 +16,8 @@ import transactionRoutes from './routes/transactions'
 import categoryRoutes from './routes/categories'
 import recurringRoutes from './routes/recurring'
 import summaryRoutes from './routes/summary'
+import budgetRoutes from './routes/budgets'
+import cronRoutes from './routes/cron'
 
 export function createApp() {
   const config = env()
@@ -68,6 +70,8 @@ export function createApp() {
   app.use('/api/categories', authenticate, categoryRoutes)
   app.use('/api/recurring-transactions', authenticate, recurringRoutes)
   app.use('/api/summary', authenticate, summaryRoutes)
+  app.use('/api/budgets', authenticate, budgetRoutes)
+  app.use('/api/cron', cronRoutes)
 
   app.use((_req, res) => {
     res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Endpoint não encontrado.' })

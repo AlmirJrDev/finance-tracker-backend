@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { Category, type CategoryDoc } from '../models/Category'
 import { Transaction } from '../models/Transaction'
 import { RecurringTransaction } from '../models/RecurringTransaction'
+import { Budget } from '../models/Budget'
 import { ensureDefaultCategories, FALLBACK_CATEGORY, toCategoryDTO } from '../services/categories'
 import { asyncHandler, currentUserId, parseId } from '../lib/http'
 import { AppError, notFound } from '../lib/errors'
@@ -72,6 +73,7 @@ router.delete(
     const [moved] = await Promise.all([
       Transaction.updateMany({ userId, categoryId: category._id }, { categoryId: fallbackId }),
       RecurringTransaction.updateMany({ userId, categoryId: category._id }, { categoryId: fallbackId }),
+      Budget.deleteOne({ userId, categoryId: category._id }),
     ])
     await category.deleteOne()
 

@@ -1,6 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express'
 import { z } from 'zod'
 import { AppError, badRequest } from './errors'
+import { todayIn } from './dates'
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 
@@ -18,6 +19,11 @@ export const objectIdSchema = z.string().regex(OBJECT_ID_RE, 'ID inválido')
 export function parseId(value: string): string {
   if (!OBJECT_ID_RE.test(value)) throw badRequest('ID inválido')
   return value
+}
+
+/** Data de hoje no fuso do usuário logado. */
+export function userToday(req: Request): string {
+  return todayIn(req.user?.preferences?.timezone ?? undefined)
 }
 
 export function currentUserId(req: Request): string {

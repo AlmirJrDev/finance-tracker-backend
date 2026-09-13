@@ -9,20 +9,28 @@
  *   npm run migrate:v2 -- --apply               -> aplica
  *   npm run migrate:v2 -- --apply --remove-duplicates --drop-summaries
  *
+ * Fase 2: transações sem status recebem "paid" (data até hoje) ou "pending" (data futura).
+ *
  * É idempotente: documentos já migrados são ignorados.
  */
 import 'dotenv/config'
 import mongoose from 'mongoose'
 import type { Db, Document } from 'mongodb'
+import { todayIn } from '../src/lib/dates'
 
 export type MigrateOptions = {
   apply: boolean
   removeDuplicates: boolean
   dropSummaries: boolean
+  /** "Hoje" para definir o status de transações antigas (padrão: hoje em America/Sao_Paulo) */
+  today?: string
   log?: (msg: string) => void
 }
 
 export type MigrateReport = {
+  /** Fase 2: transações sem status; as de data futura viram pendentes */
+  withoutStatus: number
+  futureWithoutStatus: number
   transactionsToMigrate: number
   recurringToMigrate: number
   duplicateGroups: number
@@ -60,7 +68,15 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
   const recurring = db.collection('recurringtransactions')
   const categories = db.collection('categories')
 
+  const today = opts.today ?? todayIn('America/Sao_Paulo')
+  const dayOf = { $cond: [{ $eq: [{ $type: '$date' }, 'date'] }, toDay('$date'), '$date'] }
+
   const report: MigrateReport = {
+    withoutStatus: await transactions.countDocuments({ status: { $exists: false } }),
+    futureWithoutStatus: await transactions.countDocuments({
+      status: { $exists: false },
+      $expr: { $gt: [dayOf, today] },
+    }),
     transactionsToMigrate: await transactions.countDocuments(legacyTransaction),
     recurringToMigrate: await recurring.countDocuments(legacyRecurring),
     duplicateGroups: 0,
@@ -73,6 +89,7 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
   }
 
   log(`Transações a migrar: ${report.transactionsToMigrate}`)
+  log(`Transações sem status: ${report.withoutStatus} (${report.futureWithoutStatus} com data depois de ${today} viram pendentes)`)
   log(`Recorrências a migrar: ${report.recurringToMigrate}`)
 
   report.samples = await transactions
@@ -143,6 +160,12 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
     { $unset: ['amount', 'category', 'categoryName', 'month', 'year', 'isRecurringGenerated', 'parentRecurringId'] },
   ])
   log(`  transações migradas: ${txResult.modifiedCount}`)
+
+  // Fase 2: o que já passou conta como pago; o que ainda vai acontecer fica pendente
+  const statusResult = await transactions.updateMany({ status: { $exists: false } }, [
+    { $set: { status: { $cond: [{ $gt: ['$date', today] }, 'pending', 'paid'] } } },
+  ])
+  log(`  status definido em: ${statusResult.modifiedCount}`)
 
   const recResult = await recurring.updateMany(legacyRecurring, [
     {

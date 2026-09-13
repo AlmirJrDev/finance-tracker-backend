@@ -9,6 +9,7 @@ export default defineConfig({
       MONGODB_URI: 'mongodb://definido-pelos-testes',
       GOOGLE_CLIENT_ID: 'test-client-id',
       ALLOW_DEV_LOGIN: 'true',
+      CRON_SECRET: 'cron-secret-de-teste-123',
     },
     fileParallelism: false,
     testTimeout: 30_000,

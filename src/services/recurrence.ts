@@ -1,6 +1,6 @@
 import { Types } from 'mongoose'
 import { RecurringTransaction, type Frequency, type RecurringDoc } from '../models/RecurringTransaction'
-import { Transaction } from '../models/Transaction'
+import { Transaction, type TransactionStatus } from '../models/Transaction'
 import { daysInMonth, monthRange, parseMonth, toDateStr, weekday } from '../lib/dates'
 import { badRequest, isDuplicateKeyError } from '../lib/errors'
 
@@ -35,13 +35,23 @@ export function occurrencesInMonth(rule: RecurrenceRule, ym: string): string[] {
 }
 
 /**
+ * Status de uma ocorrência gerada: o que já passou conta como pago; o que está por vir fica
+ * pendente até o usuário confirmar (ou até a data chegar, se a recorrência confirma sozinha).
+ */
+export function occurrenceStatus(date: string, today: string, autoConfirm: boolean): TransactionStatus {
+  if (date < today) return 'paid'
+  if (date === today && autoConfirm) return 'paid'
+  return 'pending'
+}
+
+/**
  * Gera as transações das recorrências ativas no intervalo de meses.
  * Idempotente: o índice único (userId, recurringId, date) impede duplicatas,
  * então aplicar o mesmo mês várias vezes, em qualquer ordem, é seguro.
  */
 export async function applyRecurring(
   userId: string,
-  { from, to, ids }: { from: string; to: string; ids?: string[] }
+  { from, to, ids, today }: { from: string; to: string; ids?: string[]; today: string }
 ): Promise<{ created: number; existing: number }> {
   if (from > to) throw badRequest('"from" deve ser anterior ou igual a "to"')
   const months = monthRange(from, to)
@@ -68,6 +78,7 @@ export async function applyRecurring(
               type: r.type,
               categoryId: r.categoryId ?? null,
               note: r.note,
+              status: occurrenceStatus(date, today, Boolean(r.autoConfirm)),
               createdAt: now,
               updatedAt: now,
             },
@@ -93,4 +104,58 @@ export async function applyRecurring(
   }
 
   return { created, existing: ops.length - created }
+}
+
+/** Marca como pagas as ocorrências pendentes de recorrências com confirmação automática que já venceram. */
+export async function confirmDueOccurrences(userId: string, today: string): Promise<number> {
+  const uid = new Types.ObjectId(userId)
+  const autoIds = await RecurringTransaction.find({ userId: uid, autoConfirm: true }).distinct('_id')
+  if (autoIds.length === 0) return 0
+
+  const result = await Transaction.updateMany(
+    { userId: uid, recurringId: { $in: autoIds }, status: 'pending', date: { $lte: today } },
+    { $set: { status: 'paid' } }
+  )
+  return result.modifiedCount
+}
+
+export type VirtualOccurrence = {
+  recurringId: string
+  date: string
+  description: string
+  amountCents: number
+  type: 'income' | 'expense'
+  categoryId: string | null
+}
+
+/**
+ * Ocorrências que as recorrências ativas vão gerar entre from e to (datas) e que ainda
+ * não existem como transação. Usado na projeção de saldo sem precisar aplicar nada.
+ */
+export async function virtualOccurrences(userId: string, from: string, to: string): Promise<VirtualOccurrence[]> {
+  const uid = new Types.ObjectId(userId)
+  const items = await RecurringTransaction.find({ userId: uid, isActive: true }).lean<RecurringDoc[]>()
+  if (items.length === 0) return []
+
+  const existing = await Transaction.find(
+    { userId: uid, recurringId: { $in: items.map((r) => r._id) }, date: { $gte: from, $lte: to } },
+    { recurringId: 1, date: 1 }
+  ).lean()
+  const taken = new Set(existing.map((t) => `${t.recurringId}|${t.date}`))
+
+  const months = monthRange(from.slice(0, 7), to.slice(0, 7))
+  return items.flatMap((r) =>
+    months.flatMap((ym) =>
+      occurrencesInMonth(r, ym)
+        .filter((date) => date >= from && date <= to && !taken.has(`${r._id}|${date}`))
+        .map((date) => ({
+          recurringId: r._id.toString(),
+          date,
+          description: r.description,
+          amountCents: r.amountCents,
+          type: r.type,
+          categoryId: r.categoryId ? r.categoryId.toString() : null,
+        }))
+    )
+  )
 }

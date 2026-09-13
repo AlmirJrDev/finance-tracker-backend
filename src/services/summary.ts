@@ -7,10 +7,14 @@ import { daysInMonth, monthBounds, toDateStr, toMonthStr } from '../lib/dates'
  * Resumos são calculados na hora a partir das transações.
  * Sem cache, o saldo nunca fica desatualizado e meses sem movimento
  * não quebram a continuidade (saldo inicial = tudo que veio antes).
+ *
+ * Os saldos "previstos" consideram todas as transações; os "pagos" só as confirmadas.
+ * Transações sem status (anteriores à Fase 2) contam como pagas.
  */
 
-const isIncome = { $eq: ['$type', 'income'] }
-const signedAmount = { $cond: [isIncome, '$amountCents', { $multiply: ['$amountCents', -1] }] }
+export const isIncome = { $eq: ['$type', 'income'] }
+export const isPending = { $eq: ['$status', 'pending'] }
+export const signedAmount = { $cond: [isIncome, '$amountCents', { $multiply: ['$amountCents', -1] }] }
 
 export type DaySummary = {
   date: string
@@ -18,6 +22,7 @@ export type DaySummary = {
   expenseCents: number
   balanceCents: number
   transactionCount: number
+  pendingCount: number
 }
 
 export type MonthTotals = {
@@ -27,7 +32,14 @@ export type MonthTotals = {
   expenseCents: number
   resultCents: number
   finalBalanceCents: number
+  paidIncomeCents: number
+  paidExpenseCents: number
+  pendingIncomeCents: number
+  pendingExpenseCents: number
+  /** Saldo no fim do mês considerando só o que foi pago */
+  paidFinalBalanceCents: number
   transactionCount: number
+  pendingCount: number
   days: DaySummary[]
 }
 
@@ -38,20 +50,35 @@ export type CategoryTotal = {
   icon: string | null
   incomeCents: number
   expenseCents: number
+  pendingExpenseCents: number
   transactionCount: number
 }
 
-type DailyRow = { _id: string; incomeCents: number; expenseCents: number; count: number }
-
-async function balanceBefore(userId: Types.ObjectId, date: string): Promise<number> {
-  const [row] = await Transaction.aggregate<{ total: number }>([
-    { $match: { userId, date: { $lt: date } } },
-    { $group: { _id: null, total: { $sum: signedAmount } } },
-  ])
-  return row?.total ?? 0
+type DailyRow = {
+  _id: string
+  incomeCents: number
+  expenseCents: number
+  pendingIncomeCents: number
+  pendingExpenseCents: number
+  count: number
+  pendingCount: number
 }
 
-async function dailyTotals(userId: Types.ObjectId, from: string, to: string): Promise<Map<string, DailyRow>> {
+export async function balanceBefore(userId: Types.ObjectId, date: string): Promise<{ all: number; paid: number }> {
+  const [row] = await Transaction.aggregate<{ all: number; paid: number }>([
+    { $match: { userId, date: { $lt: date } } },
+    {
+      $group: {
+        _id: null,
+        all: { $sum: signedAmount },
+        paid: { $sum: { $cond: [isPending, 0, signedAmount] } },
+      },
+    },
+  ])
+  return { all: row?.all ?? 0, paid: row?.paid ?? 0 }
+}
+
+export async function dailyTotals(userId: Types.ObjectId, from: string, to: string): Promise<Map<string, DailyRow>> {
   const rows = await Transaction.aggregate<DailyRow>([
     { $match: { userId, date: { $gte: from, $lte: to } } },
     {
@@ -59,19 +86,27 @@ async function dailyTotals(userId: Types.ObjectId, from: string, to: string): Pr
         _id: '$date',
         incomeCents: { $sum: { $cond: [isIncome, '$amountCents', 0] } },
         expenseCents: { $sum: { $cond: [isIncome, 0, '$amountCents'] } },
+        pendingIncomeCents: { $sum: { $cond: [{ $and: [isIncome, isPending] }, '$amountCents', 0] } },
+        pendingExpenseCents: {
+          $sum: { $cond: [{ $and: [{ $not: [isIncome] }, isPending] }, '$amountCents', 0] },
+        },
         count: { $sum: 1 },
+        pendingCount: { $sum: { $cond: [isPending, 1, 0] } },
       },
     },
   ])
   return new Map(rows.map((r) => [r._id, r]))
 }
 
-function buildMonth(ym: string, initialBalanceCents: number, daily: Map<string, DailyRow>): MonthTotals {
+function buildMonth(
+  ym: string,
+  initial: { all: number; paid: number },
+  daily: Map<string, DailyRow>
+): MonthTotals {
   const [year, month] = ym.split('-').map(Number)
-  let balance = initialBalanceCents
-  let incomeCents = 0
-  let expenseCents = 0
-  let transactionCount = 0
+  let balance = initial.all
+  let paidBalance = initial.paid
+  const totals = { income: 0, expense: 0, pendingIncome: 0, pendingExpense: 0, count: 0, pendingCount: 0 }
 
   const days: DaySummary[] = []
   for (let d = 1; d <= daysInMonth(year, month); d++) {
@@ -79,21 +114,42 @@ function buildMonth(ym: string, initialBalanceCents: number, daily: Map<string, 
     const row = daily.get(date)
     const inc = row?.incomeCents ?? 0
     const exp = row?.expenseCents ?? 0
+    const pInc = row?.pendingIncomeCents ?? 0
+    const pExp = row?.pendingExpenseCents ?? 0
+
     balance += inc - exp
-    incomeCents += inc
-    expenseCents += exp
-    transactionCount += row?.count ?? 0
-    days.push({ date, incomeCents: inc, expenseCents: exp, balanceCents: balance, transactionCount: row?.count ?? 0 })
+    paidBalance += inc - pInc - (exp - pExp)
+    totals.income += inc
+    totals.expense += exp
+    totals.pendingIncome += pInc
+    totals.pendingExpense += pExp
+    totals.count += row?.count ?? 0
+    totals.pendingCount += row?.pendingCount ?? 0
+
+    days.push({
+      date,
+      incomeCents: inc,
+      expenseCents: exp,
+      balanceCents: balance,
+      transactionCount: row?.count ?? 0,
+      pendingCount: row?.pendingCount ?? 0,
+    })
   }
 
   return {
     month: ym,
-    initialBalanceCents,
-    incomeCents,
-    expenseCents,
-    resultCents: incomeCents - expenseCents,
+    initialBalanceCents: initial.all,
+    incomeCents: totals.income,
+    expenseCents: totals.expense,
+    resultCents: totals.income - totals.expense,
     finalBalanceCents: balance,
-    transactionCount,
+    paidIncomeCents: totals.income - totals.pendingIncome,
+    paidExpenseCents: totals.expense - totals.pendingExpense,
+    pendingIncomeCents: totals.pendingIncome,
+    pendingExpenseCents: totals.pendingExpense,
+    paidFinalBalanceCents: paidBalance,
+    transactionCount: totals.count,
+    pendingCount: totals.pendingCount,
     days,
   }
 }
@@ -106,6 +162,9 @@ async function categoryTotals(userId: Types.ObjectId, from: string, to: string):
         _id: '$categoryId',
         incomeCents: { $sum: { $cond: [isIncome, '$amountCents', 0] } },
         expenseCents: { $sum: { $cond: [isIncome, 0, '$amountCents'] } },
+        pendingExpenseCents: {
+          $sum: { $cond: [{ $and: [{ $not: [isIncome] }, isPending] }, '$amountCents', 0] },
+        },
         count: { $sum: 1 },
       },
     },
@@ -115,6 +174,7 @@ async function categoryTotals(userId: Types.ObjectId, from: string, to: string):
     _id: Types.ObjectId | null
     incomeCents: number
     expenseCents: number
+    pendingExpenseCents: number
     count: number
   }>(pipeline)
 
@@ -131,6 +191,7 @@ async function categoryTotals(userId: Types.ObjectId, from: string, to: string):
       icon: cat?.icon ?? null,
       incomeCents: r.incomeCents,
       expenseCents: r.expenseCents,
+      pendingExpenseCents: r.pendingExpenseCents,
       transactionCount: r.count,
     }
   })
@@ -155,22 +216,22 @@ export async function getYearSummary(userId: string, year: number) {
   ])
 
   const months: MonthTotals[] = []
-  let balance = initial
+  let carry = initial
   for (let m = 1; m <= 12; m++) {
-    const month = buildMonth(toMonthStr(year, m), balance, daily)
+    const month = buildMonth(toMonthStr(year, m), carry, daily)
     months.push(month)
-    balance = month.finalBalanceCents
+    carry = { all: month.finalBalanceCents, paid: month.paidFinalBalanceCents }
   }
 
   const incomeCents = months.reduce((s, m) => s + m.incomeCents, 0)
   const expenseCents = months.reduce((s, m) => s + m.expenseCents, 0)
   return {
     year,
-    initialBalanceCents: initial,
+    initialBalanceCents: initial.all,
     incomeCents,
     expenseCents,
     resultCents: incomeCents - expenseCents,
-    finalBalanceCents: balance,
+    finalBalanceCents: carry.all,
     months,
   }
 }

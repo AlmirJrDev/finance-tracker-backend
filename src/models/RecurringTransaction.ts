@@ -22,6 +22,8 @@ const recurringSchema = new Schema(
     dayOfMonth: { type: Number, min: 1, max: 31, default: null }, // monthly
     dayOfWeek: { type: Number, min: 0, max: 6, default: null }, // weekly (0 = domingo)
     isActive: { type: Boolean, default: true },
+    // Marca como paga automaticamente quando a data chega (salário, débito automático)
+    autoConfirm: { type: Boolean, default: false },
     startDate: { type: String, required: true, match: DATE_RE },
     endDate: { type: String, match: DATE_RE, default: null },
     note: { type: String, maxlength: 500, trim: true },

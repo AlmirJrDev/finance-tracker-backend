@@ -9,6 +9,8 @@ const schema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(''),
   // Aceita várias origens separadas por vírgula
   FRONTEND_URL: z.string().default('http://localhost:3000'),
+  // Segredo que a Vercel envia nas chamadas de cron (sem ele o endpoint fica desativado)
+  CRON_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
   // Login sem Google, apenas para desenvolvimento local
   ALLOW_DEV_LOGIN: z
     .enum(['true', 'false'])

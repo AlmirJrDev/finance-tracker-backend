@@ -51,6 +51,13 @@ export function monthRange(from: string, to: string): string[] {
   return months
 }
 
+/** Mesmo dia n meses depois, limitado ao último dia do mês (31/01 + 1 → 28/02). */
+export function addMonthsToDate(date: string, n: number): string {
+  const ym = addMonths(date.slice(0, 7), n)
+  const { year, month } = parseMonth(ym)
+  return toDateStr(year, month, Math.min(Number(date.slice(8, 10)), daysInMonth(year, month)))
+}
+
 export function addDays(date: string, n: number): string {
   const [y, m, d] = date.split('-').map(Number)
   const dt = new Date(Date.UTC(y, m - 1, d + n))

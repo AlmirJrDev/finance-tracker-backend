@@ -60,8 +60,20 @@ describe('migração v1 → v2', () => {
     await mongoose.connection.db!.collection('transactions').dropIndex('recurring_occurrence_unique').catch(() => {})
     await seedLegacy(user.id)
 
-    const report = await migrate(mongoose.connection.db!, { apply: false, removeDuplicates: true, dropSummaries: true, log: quiet })
-    expect(report).toMatchObject({ transactionsToMigrate: 3, recurringToMigrate: 1, duplicateDocs: 1 })
+    const report = await migrate(mongoose.connection.db!, {
+      apply: false,
+      removeDuplicates: true,
+      dropSummaries: true,
+      today: '2026-03-15',
+      log: quiet,
+    })
+    expect(report).toMatchObject({
+      transactionsToMigrate: 3,
+      recurringToMigrate: 1,
+      duplicateDocs: 1,
+      withoutStatus: 3,
+      futureWithoutStatus: 1,
+    })
     expect(await mongoose.connection.db!.collection('transactions').countDocuments({ amountCents: { $exists: true } })).toBe(0)
   })
 
@@ -71,16 +83,31 @@ describe('migração v1 → v2', () => {
     await db.collection('transactions').dropIndex('recurring_occurrence_unique').catch(() => {})
     const { categoryId } = await seedLegacy(user.id)
 
-    const report = await migrate(db, { apply: true, removeDuplicates: true, dropSummaries: true, log: quiet })
+    // "Hoje" em 15/03: o mercado de 31/03 ainda vai acontecer
+    const opts = { apply: true, removeDuplicates: true, dropSummaries: true, today: '2026-03-15', log: quiet }
+    const report = await migrate(db, opts)
     expect(report).toMatchObject({ duplicatesRemoved: 1, summariesDropped: true, indexWarnings: [] })
 
     const tx = await db.collection('transactions').findOne({ description: 'Mercado' })
-    expect(tx).toMatchObject({ amountCents: 12_345, date: '2026-03-31', type: 'expense', categoryId, recurringId: null })
+    expect(tx).toMatchObject({
+      amountCents: 12_345,
+      date: '2026-03-31',
+      type: 'expense',
+      categoryId,
+      recurringId: null,
+      status: 'pending',
+    })
+    expect(await db.collection('transactions').findOne({ description: 'Salário' })).toMatchObject({ status: 'paid' })
     expect(tx).not.toHaveProperty('amount')
     expect(tx).not.toHaveProperty('categoryName')
 
     const summary = (await api.get('/api/summary/month/2026-03').expect(200)).body.data
-    expect(summary).toMatchObject({ incomeCents: 450_050, expenseCents: 12_345, transactionCount: 2 })
+    expect(summary).toMatchObject({
+      incomeCents: 450_050,
+      expenseCents: 12_345,
+      pendingExpenseCents: 12_345,
+      transactionCount: 2,
+    })
 
     const recurring = (await api.get('/api/recurring-transactions').expect(200)).body.data
     expect(recurring[0]).toMatchObject({ amountCents: 450_050, type: 'income', startDate: '2026-01-01', endDate: null })
@@ -90,7 +117,7 @@ describe('migração v1 → v2', () => {
     expect(applied.body.data).toEqual({ created: 0, existing: 1 })
 
     // Rodar de novo é seguro
-    const second = await migrate(db, { apply: true, removeDuplicates: true, dropSummaries: true, log: quiet })
-    expect(second).toMatchObject({ transactionsToMigrate: 0, recurringToMigrate: 0, duplicateDocs: 0 })
+    const second = await migrate(db, opts)
+    expect(second).toMatchObject({ transactionsToMigrate: 0, recurringToMigrate: 0, duplicateDocs: 0, withoutStatus: 0 })
   })
 })

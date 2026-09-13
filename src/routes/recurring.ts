@@ -5,7 +5,7 @@ import { MAX_AMOUNT_CENTS, TRANSACTION_TYPES } from '../models/Transaction'
 import { assertCategoryOwnership, categoryMap, type CategoryDTO } from '../services/categories'
 import { applyRecurring } from '../services/recurrence'
 import { MONTH_RE } from '../lib/dates'
-import { asyncHandler, currentUserId, objectIdSchema, parseId } from '../lib/http'
+import { asyncHandler, currentUserId, objectIdSchema, parseId, userToday } from '../lib/http'
 import { notFound } from '../lib/errors'
 import { dateSchema } from './transactions'
 
@@ -20,6 +20,7 @@ const baseSchema = z.object({
   dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
   dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
   isActive: z.boolean().default(true),
+  autoConfirm: z.boolean().default(false),
   startDate: dateSchema,
   endDate: dateSchema.nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
@@ -56,6 +57,7 @@ function toRecurringDTO(r: RecurringDoc, categories: Map<string, CategoryDTO>) {
     dayOfMonth: r.frequency === 'monthly' ? (r.dayOfMonth ?? null) : null,
     dayOfWeek: r.frequency === 'weekly' ? (r.dayOfWeek ?? null) : null,
     isActive: r.isActive,
+    autoConfirm: Boolean(r.autoConfirm),
     startDate: r.startDate,
     endDate: r.endDate ?? null,
     note: r.note ?? null,
@@ -85,7 +87,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = currentUserId(req)
     const body = applySchema.parse(req.body)
-    const result = await applyRecurring(userId, body)
+    const result = await applyRecurring(userId, { ...body, today: userToday(req) })
     res.json({
       success: true,
       data: result,
@@ -140,6 +142,7 @@ router.put(
       dayOfMonth: merged.dayOfMonth ?? null,
       dayOfWeek: merged.dayOfWeek ?? null,
       isActive: merged.isActive,
+      autoConfirm: merged.autoConfirm,
       startDate: merged.startDate,
       endDate: merged.endDate ?? null,
       note: merged.note ?? undefined,
