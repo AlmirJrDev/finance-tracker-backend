@@ -3,8 +3,10 @@
  * Os dados ficam em .data/mongo e sobrevivem entre execuções.
  *
  *   npm run dev:memory
+ *
+ * Não lê o .env de propósito: ele pode ter credenciais de produção
+ * (banco, JWT_SECRET, CRON_SECRET) que nunca devem ser usadas localmente.
  */
-import 'dotenv/config'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { MongoMemoryServer } from 'mongodb-memory-server'
@@ -17,10 +19,16 @@ async function main() {
     instance: { dbPath, storageEngine: 'wiredTiger', port: 27018 },
   })
 
-  process.env.MONGODB_URI = mongo.getUri('finance-tracker')
-  process.env.NODE_ENV ??= 'development'
-  process.env.JWT_SECRET ??= 'dev-secret-somente-local-123456'
-  process.env.ALLOW_DEV_LOGIN ??= 'true'
+  Object.assign(process.env, {
+    MONGODB_URI: mongo.getUri('finance-tracker'),
+    NODE_ENV: 'development',
+    PORT: process.env.DEV_API_PORT ?? '3001',
+    JWT_SECRET: 'dev-secret-somente-local-123456',
+    FRONTEND_URL: 'http://localhost:3000',
+    ALLOW_DEV_LOGIN: 'true',
+    GOOGLE_CLIENT_ID: '',
+    CRON_SECRET: 'cron-secret-somente-local',
+  })
 
   const { createApp } = await import('../src/app')
   const { connectDB } = await import('../src/lib/db')

@@ -8,6 +8,7 @@ import { MONTH_RE } from '../lib/dates'
 import { asyncHandler, currentUserId, objectIdSchema, parseId, userToday } from '../lib/http'
 import { notFound } from '../lib/errors'
 import { dateSchema } from './transactions'
+import { resolveAccountId } from '../services/accounts'
 
 const router = Router()
 
@@ -16,6 +17,7 @@ const baseSchema = z.object({
   amountCents: z.number().int('amountCents deve ser inteiro (centavos)').positive().max(MAX_AMOUNT_CENTS),
   type: z.enum(TRANSACTION_TYPES),
   categoryId: objectIdSchema.nullable().optional(),
+  accountId: objectIdSchema.nullable().optional(),
   frequency: z.enum(FREQUENCIES),
   dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
   dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
@@ -53,6 +55,7 @@ function toRecurringDTO(r: RecurringDoc, categories: Map<string, CategoryDTO>) {
     type: r.type,
     categoryId,
     category: categoryId ? (categories.get(categoryId) ?? null) : null,
+    accountId: r.accountId ? r.accountId.toString() : null,
     frequency: r.frequency,
     dayOfMonth: r.frequency === 'monthly' ? (r.dayOfMonth ?? null) : null,
     dayOfWeek: r.frequency === 'weekly' ? (r.dayOfWeek ?? null) : null,
@@ -112,7 +115,8 @@ router.post(
     const userId = currentUserId(req)
     const body = fullSchema.parse(req.body)
     await assertCategoryOwnership(userId, body.categoryId)
-    const created = await RecurringTransaction.create({ ...body, userId })
+    const accountId = await resolveAccountId(userId, body.accountId)
+    const created = await RecurringTransaction.create({ ...body, accountId, userId })
     res.status(201).json({
       success: true,
       data: toRecurringDTO(created.toObject() as RecurringDoc, await categoryMap(userId)),
@@ -132,12 +136,14 @@ router.put(
     const patch = baseSchema.partial().parse(req.body)
     const merged = fullSchema.parse({ ...current, ...patch })
     if (patch.categoryId !== undefined) await assertCategoryOwnership(userId, patch.categoryId)
+    const accountId = patch.accountId !== undefined ? await resolveAccountId(userId, patch.accountId) : item.accountId
 
     item.set({
       description: merged.description,
       amountCents: merged.amountCents,
       type: merged.type,
       categoryId: merged.categoryId ?? null,
+      accountId,
       frequency: merged.frequency,
       dayOfMonth: merged.dayOfMonth ?? null,
       dayOfWeek: merged.dayOfWeek ?? null,

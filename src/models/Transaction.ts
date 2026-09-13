@@ -9,6 +9,24 @@ export type TransactionType = (typeof TRANSACTION_TYPES)[number]
 export const TRANSACTION_STATUSES = ['paid', 'pending'] as const
 export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number]
 
+/**
+ * regular: receita/despesa de verdade (entra em totais, categorias e orçamentos)
+ * transfer: movimento entre contas do próprio usuário (só mexe no saldo de cada conta)
+ * adjustment: ajuste de saldo, ex.: saldo inicial de uma conta (só mexe no saldo)
+ * Documentos sem kind são regular.
+ */
+export const TRANSACTION_KINDS = ['regular', 'transfer', 'adjustment'] as const
+export type TransactionKind = (typeof TRANSACTION_KINDS)[number]
+
+const externalSchema = new Schema(
+  {
+    provider: { type: String, enum: ['pluggy'], required: true },
+    id: { type: String, required: true },
+    category: { type: String },
+  },
+  { _id: false }
+)
+
 const installmentSchema = new Schema(
   {
     groupId: { type: Schema.Types.ObjectId, required: true },
@@ -36,8 +54,24 @@ const transactionSchema = new Schema(
     recurringId: { type: Schema.Types.ObjectId, ref: 'RecurringTransaction', default: null },
     status: { type: String, enum: TRANSACTION_STATUSES, default: 'paid' },
     installment: { type: installmentSchema, default: undefined },
+    accountId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
+    kind: { type: String, enum: TRANSACTION_KINDS, default: 'regular' },
+    /** Liga as duas pernas de uma transferência */
+    transferId: { type: Schema.Types.ObjectId, default: undefined },
+    /** Origem externa (sincronização bancária) */
+    external: { type: externalSchema, default: undefined },
   },
   { timestamps: true }
+)
+
+transactionSchema.index({ userId: 1, accountId: 1, date: 1 })
+transactionSchema.index(
+  { userId: 1, transferId: 1 },
+  { partialFilterExpression: { transferId: { $exists: true } }, name: 'transfer_pair' }
+)
+transactionSchema.index(
+  { userId: 1, 'external.provider': 1, 'external.id': 1 },
+  { unique: true, partialFilterExpression: { 'external.id': { $exists: true } }, name: 'external_unique' }
 )
 
 transactionSchema.index({ userId: 1, date: -1 })

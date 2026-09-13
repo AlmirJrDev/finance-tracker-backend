@@ -17,6 +17,7 @@ import categoryRoutes from './routes/categories'
 import recurringRoutes from './routes/recurring'
 import summaryRoutes from './routes/summary'
 import budgetRoutes from './routes/budgets'
+import accountRoutes from './routes/accounts'
 import cronRoutes from './routes/cron'
 
 const normalizeOrigin = (o: string) => o.trim().replace(/\/+$/, '').toLowerCase()
@@ -83,6 +84,7 @@ export function createApp() {
   app.use('/api/recurring-transactions', authenticate, recurringRoutes)
   app.use('/api/summary', authenticate, summaryRoutes)
   app.use('/api/budgets', authenticate, budgetRoutes)
+  app.use('/api/accounts', authenticate, accountRoutes)
   app.use('/api/cron', cronRoutes)
 
   app.use((_req, res) => {

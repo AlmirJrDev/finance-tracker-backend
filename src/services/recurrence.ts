@@ -3,6 +3,8 @@ import { RecurringTransaction, type Frequency, type RecurringDoc } from '../mode
 import { Transaction, type TransactionStatus } from '../models/Transaction'
 import { daysInMonth, monthRange, parseMonth, toDateStr, weekday } from '../lib/dates'
 import { badRequest, isDuplicateKeyError } from '../lib/errors'
+import { ensureDefaultAccount } from './accounts'
+import type { Scope } from './summary'
 
 export const MAX_APPLY_MONTHS = 24
 
@@ -65,6 +67,8 @@ export async function applyRecurring(
 
   const items = await RecurringTransaction.find(filter).lean<RecurringDoc[]>()
   const now = new Date()
+  // bulkWrite não passa pela validação do schema: garante a conta aqui
+  const fallbackAccountId = items.some((r) => !r.accountId) ? await ensureDefaultAccount(uid) : null
 
   const ops = items.flatMap((r) =>
     months.flatMap((ym) =>
@@ -77,6 +81,8 @@ export async function applyRecurring(
               amountCents: r.amountCents,
               type: r.type,
               categoryId: r.categoryId ?? null,
+              accountId: (r.accountId ?? fallbackAccountId)!,
+              kind: 'regular' as const,
               note: r.note,
               status: occurrenceStatus(date, today, Boolean(r.autoConfirm)),
               createdAt: now,
@@ -126,15 +132,18 @@ export type VirtualOccurrence = {
   amountCents: number
   type: 'income' | 'expense'
   categoryId: string | null
+  accountId: string | null
 }
 
 /**
  * Ocorrências que as recorrências ativas vão gerar entre from e to (datas) e que ainda
  * não existem como transação. Usado na projeção de saldo sem precisar aplicar nada.
  */
-export async function virtualOccurrences(userId: string, from: string, to: string): Promise<VirtualOccurrence[]> {
-  const uid = new Types.ObjectId(userId)
-  const items = await RecurringTransaction.find({ userId: uid, isActive: true }).lean<RecurringDoc[]>()
+export async function virtualOccurrences(scope: Scope, from: string, to: string): Promise<VirtualOccurrence[]> {
+  const uid = new Types.ObjectId(scope.userId)
+  const ruleFilter: Record<string, unknown> = { userId: uid, isActive: true }
+  if (scope.accountId) ruleFilter.accountId = new Types.ObjectId(scope.accountId)
+  const items = await RecurringTransaction.find(ruleFilter).lean<RecurringDoc[]>()
   if (items.length === 0) return []
 
   const existing = await Transaction.find(
@@ -155,6 +164,7 @@ export async function virtualOccurrences(userId: string, from: string, to: strin
           amountCents: r.amountCents,
           type: r.type,
           categoryId: r.categoryId ? r.categoryId.toString() : null,
+          accountId: r.accountId ? r.accountId.toString() : null,
         }))
     )
   )

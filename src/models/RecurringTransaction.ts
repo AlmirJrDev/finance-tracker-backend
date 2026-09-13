@@ -18,6 +18,7 @@ const recurringSchema = new Schema(
     },
     type: { type: String, required: true, enum: TRANSACTION_TYPES },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null },
+    accountId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
     frequency: { type: String, required: true, enum: FREQUENCIES },
     dayOfMonth: { type: Number, min: 1, max: 31, default: null }, // monthly
     dayOfWeek: { type: Number, min: 0, max: 6, default: null }, // weekly (0 = domingo)

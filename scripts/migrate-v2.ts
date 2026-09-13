@@ -9,6 +9,7 @@
  *   npm run migrate:v2 -- --apply               -> aplica
  *   npm run migrate:v2 -- --apply --remove-duplicates --drop-summaries
  *
+ * Fase 3: cada usuário ganha uma "Conta principal" e os lançamentos sem conta passam a apontar para ela.
  * Fase 2: transações sem status recebem "paid" (data até hoje) ou "pending" (data futura).
  *
  * É idempotente: documentos já migrados são ignorados.
@@ -28,6 +29,9 @@ export type MigrateOptions = {
 }
 
 export type MigrateReport = {
+  /** Fase 3: lançamentos (transações + recorrências) sem conta */
+  withoutAccount: number
+  accountsCreated: number
   /** Fase 2: transações sem status; as de data futura viram pendentes */
   withoutStatus: number
   futureWithoutStatus: number
@@ -71,7 +75,10 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
   const today = opts.today ?? todayIn('America/Sao_Paulo')
   const dayOf = { $cond: [{ $eq: [{ $type: '$date' }, 'date'] }, toDay('$date'), '$date'] }
 
+  const noAccount = { accountId: { $exists: false } }
   const report: MigrateReport = {
+    withoutAccount: (await transactions.countDocuments(noAccount)) + (await recurring.countDocuments(noAccount)),
+    accountsCreated: 0,
     withoutStatus: await transactions.countDocuments({ status: { $exists: false } }),
     futureWithoutStatus: await transactions.countDocuments({
       status: { $exists: false },
@@ -89,6 +96,7 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
   }
 
   log(`Transações a migrar: ${report.transactionsToMigrate}`)
+  log(`Lançamentos sem conta: ${report.withoutAccount}`)
   log(`Transações sem status: ${report.withoutStatus} (${report.futureWithoutStatus} com data depois de ${today} viram pendentes)`)
   log(`Recorrências a migrar: ${report.recurringToMigrate}`)
 
@@ -183,6 +191,29 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
 
   await categories.updateMany({ transactionCount: { $exists: true } }, { $unset: { transactionCount: '' } })
 
+  // Fase 3: conta padrão para quem tem lançamentos sem conta
+  const accounts = db.collection('accounts')
+  const userIds = [
+    ...new Set([
+      ...(await transactions.distinct('userId', noAccount)),
+      ...(await recurring.distinct('userId', noAccount)),
+    ].map(String)),
+  ]
+  for (const id of userIds) {
+    const userId = new mongoose.Types.ObjectId(id)
+    let account = await accounts.findOne({ userId, isDefault: true })
+    if (!account) {
+      const now = new Date()
+      const doc = { userId, name: 'Conta principal', type: 'checking', color: '#10B981', isDefault: true, isArchived: false, createdAt: now, updatedAt: now }
+      const { insertedId } = await accounts.insertOne(doc)
+      account = { _id: insertedId, ...doc }
+      report.accountsCreated++
+    }
+    await transactions.updateMany({ userId, ...noAccount }, { $set: { accountId: account._id } })
+    await recurring.updateMany({ userId, ...noAccount }, { $set: { accountId: account._id } })
+  }
+  log(`  contas padrão criadas: ${report.accountsCreated} (lançamentos vinculados: ${report.withoutAccount})`)
+
   if (duplicates.length && opts.removeDuplicates) {
     // Mantém a transação mais antiga de cada grupo
     const toRemove = duplicates.flatMap((d) => [...d.ids].sort((a, b) => a.getTimestamp().getTime() - b.getTimestamp().getTime()).slice(1))
@@ -214,6 +245,8 @@ export async function migrate(db: Db, opts: MigrateOptions): Promise<MigrateRepo
       { unique: true, partialFilterExpression: { recurringId: { $type: 'objectId' } }, name: 'recurring_occurrence_unique' },
     ],
     ['categories', { userId: 1, name: 1 }, { unique: true, collation: { locale: 'pt', strength: 1 }, name: 'userId_name_ci' }],
+    ['transactions', { userId: 1, accountId: 1, date: 1 }, {}],
+    ['accounts', { userId: 1, name: 1 }, { unique: true, collation: { locale: 'pt', strength: 1 }, name: 'userId_account_name_ci' }],
   ]
   for (const [collection, keys, options] of indexes) {
     try {

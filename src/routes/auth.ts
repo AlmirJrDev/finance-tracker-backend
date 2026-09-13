@@ -5,6 +5,7 @@ import { devLoginEnabled, env } from '../config/env'
 import { User, type UserDoc } from '../models/User'
 import { authenticate, generateToken } from '../middleware/auth'
 import { ensureDefaultCategories } from '../services/categories'
+import { ensureDefaultAccount } from '../services/accounts'
 import { AppError } from '../lib/errors'
 import { asyncHandler, currentUserId } from '../lib/http'
 import { logger } from '../lib/logger'
@@ -48,7 +49,7 @@ function toUserDTO(u: UserDoc) {
 }
 
 async function respondWithSession(res: import('express').Response, user: UserDoc) {
-  await ensureDefaultCategories(user._id)
+  await Promise.all([ensureDefaultCategories(user._id), ensureDefaultAccount(user._id)])
   const { token, expiresAt } = generateToken(user._id.toString())
   res.json({ success: true, data: { token, expiresAt, user: toUserDTO(user) } })
 }

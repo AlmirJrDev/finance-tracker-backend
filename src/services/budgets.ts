@@ -21,7 +21,15 @@ export async function getBudgetStatus(userId: string, month: string) {
   const [budgets, spending, categories] = await Promise.all([
     Budget.find({ userId: uid }).lean<BudgetDoc[]>(),
     Transaction.aggregate<{ _id: Types.ObjectId; paidCents: number; pendingCents: number }>([
-      { $match: { userId: uid, type: 'expense', categoryId: { $ne: null }, date: { $gte: from, $lte: to } } },
+      {
+        $match: {
+          userId: uid,
+          type: 'expense',
+          kind: { $nin: ['transfer', 'adjustment'] },
+          categoryId: { $ne: null },
+          date: { $gte: from, $lte: to },
+        },
+      },
       {
         $group: {
           _id: '$categoryId',

@@ -62,7 +62,19 @@ Todas as rotas, exceto `/health` e `/api/auth/google|dev`, exigem `Authorization
 | GET | `/api/summary/projection` | `?days=7..366` (padrão 90): saldo pago hoje, saldo previsto dia a dia, menor saldo, primeira data negativa, atrasadas e próximos 7 dias |
 | GET | `/api/budgets` | `?month=YYYY-MM` (padrão: mês atual): gasto pago, previsto, % e nível (`ok`, `warning`, `exceeded`) |
 | PUT/DELETE | `/api/budgets/:categoryId` | `{ amountCents, alertPercent? }` (alerta padrão em 80%) |
-| GET | `/api/cron/recurring` | Chamado pela Vercel com `Authorization: Bearer $CRON_SECRET` |
+| GET/POST |  | Contas com saldo pago até hoje e previsto até o fim do mês; a lista cria a "Conta principal" |
+| PUT/DELETE |  |  troca a padrão; remover conta com lançamentos exige  |
+| POST |  |  cria um ajuste para o saldo bater com o banco |
+| POST |  |  |
+| GET |  | Chamado pela Vercel com `Authorization: Bearer $CRON_SECRET` |
+
+## Contas, transferências e ajustes
+
+- Toda transação e recorrência pertence a uma conta (); sem conta, vai para a padrão.
+- :  (receita/despesa),  (entre contas, duas pernas ligadas por ) e  (ajuste de saldo).
+- Transferências e ajustes mudam saldos, mas ficam fora de receitas, despesas, categorias e orçamentos ( no resumo).
+- Resumos, projeção e lista de transações aceitam .
+- Cartão de crédito: compras são despesas; o pagamento da fatura é uma transferência da conta corrente para o cartão.
 
 ## Status, projeção e recorrências automáticas
 

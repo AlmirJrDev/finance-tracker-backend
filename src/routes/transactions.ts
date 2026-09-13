@@ -5,10 +5,12 @@ import {
   Transaction,
   TRANSACTION_STATUSES,
   TRANSACTION_TYPES,
+  TRANSACTION_KINDS,
   MAX_AMOUNT_CENTS,
   type TransactionDoc,
 } from '../models/Transaction'
 import { assertCategoryOwnership, categoryMap, type CategoryDTO } from '../services/categories'
+import { resolveAccountId } from '../services/accounts'
 import { addDays, addMonthsToDate, isValidDate, monthBounds, MONTH_RE } from '../lib/dates'
 import { asyncHandler, currentUserId, objectIdSchema, parseId, userToday } from '../lib/http'
 import { badRequest, notFound } from '../lib/errors'
@@ -27,6 +29,8 @@ const bodySchema = z.object({
   amountCents: amountSchema,
   type: z.enum(TRANSACTION_TYPES),
   categoryId: objectIdSchema.nullable().optional(),
+  // Se omitido, usa a conta padrão
+  accountId: objectIdSchema.optional(),
   note: z.string().trim().max(500).nullable().optional(),
   // Se omitido: pendente quando a data é futura, pago caso contrário
   status: z.enum(TRANSACTION_STATUSES).optional(),
@@ -39,6 +43,7 @@ const installmentsSchema = z.object({
   installments: z.number().int().min(2).max(MAX_INSTALLMENTS),
   type: z.enum(TRANSACTION_TYPES).default('expense'),
   categoryId: objectIdSchema.nullable().optional(),
+  accountId: objectIdSchema.optional(),
   note: z.string().trim().max(500).nullable().optional(),
 })
 
@@ -48,7 +53,9 @@ const listQuerySchema = z.object({
   to: dateSchema.optional(),
   type: z.enum(TRANSACTION_TYPES).optional(),
   status: z.enum(TRANSACTION_STATUSES).optional(),
+  kind: z.enum(TRANSACTION_KINDS).optional(),
   categoryId: objectIdSchema.optional(),
+  accountId: objectIdSchema.optional(),
   q: z.string().trim().max(100).optional(),
   sort: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
@@ -71,6 +78,10 @@ export function toTransactionDTO(t: TransactionDoc, categories: Map<string, Cate
     amountCents: t.amountCents,
     type: t.type,
     status: t.status ?? 'paid',
+    kind: t.kind ?? 'regular',
+    accountId: t.accountId ? t.accountId.toString() : null,
+    transferId: t.transferId ? t.transferId.toString() : null,
+    source: t.external?.provider ?? 'manual',
     categoryId,
     category: categoryId ? (categories.get(categoryId) ?? null) : null,
     note: t.note ?? null,
@@ -103,6 +114,8 @@ router.get(
     // Documentos antigos sem status são pagos
     if (query.status) filter.status = query.status === 'paid' ? { $ne: 'pending' } : 'pending'
     if (query.categoryId) filter.categoryId = query.categoryId
+    if (query.accountId) filter.accountId = query.accountId
+    if (query.kind) filter.kind = query.kind === 'regular' ? { $nin: ['transfer', 'adjustment'] } : query.kind
     if (query.q) {
       const escaped = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       filter.description = { $regex: escaped, $options: 'i' }
@@ -139,6 +152,7 @@ router.post(
     assertDateInRange(req, lastDate)
     if (body.totalAmountCents < body.installments) throw badRequest('Valor menor que o número de parcelas')
     await assertCategoryOwnership(userId, body.categoryId)
+    const accountId = await resolveAccountId(userId, body.accountId)
 
     const groupId = new Types.ObjectId()
     const base = Math.floor(body.totalAmountCents / body.installments)
@@ -153,6 +167,8 @@ router.post(
         amountCents: base + (i === 0 ? remainder : 0),
         type: body.type,
         categoryId: body.categoryId ?? null,
+        accountId,
+        kind: 'regular',
         note: body.note ?? undefined,
         status: defaultStatus(date, today),
         installment: { groupId, number: i + 1, total: body.installments },
@@ -215,6 +231,8 @@ router.post(
 
     const created = await Transaction.create({
       ...body,
+      accountId: await resolveAccountId(userId, body.accountId),
+      kind: 'regular',
       status: body.status ?? defaultStatus(body.date, userToday(req)),
       userId,
     })
@@ -232,7 +250,24 @@ router.put(
     if (!t) throw notFound('Transação não encontrada')
 
     if (body.date && body.date !== t.date) assertDateInRange(req, body.date)
+
+    if (t.kind === 'transfer') {
+      // As duas pernas andam juntas; conta, tipo e categoria são definidos pela transferência
+      if (body.type !== undefined && body.type !== t.type) throw badRequest('Não é possível mudar o tipo de uma transferência')
+      if (body.accountId !== undefined && body.accountId !== t.accountId.toString()) {
+        throw badRequest('Para mudar as contas, exclua e crie a transferência de novo')
+      }
+      if (body.categoryId) throw badRequest('Transferências não têm categoria')
+      const shared = { date: body.date, amountCents: body.amountCents, description: body.description, status: body.status }
+      const changes = Object.fromEntries(Object.entries(shared).filter(([, v]) => v !== undefined))
+      await Transaction.updateMany({ userId, transferId: t.transferId }, { $set: changes }, { runValidators: true })
+      if (body.note !== undefined) await Transaction.updateOne({ _id: t._id }, { $set: { note: body.note } })
+      const updated = await Transaction.findById(t._id).lean<TransactionDoc>()
+      return res.json({ success: true, data: toTransactionDTO(updated!, await categoryMap(userId)) })
+    }
+
     if (body.categoryId !== undefined) await assertCategoryOwnership(userId, body.categoryId)
+    if (body.accountId !== undefined) body.accountId = (await resolveAccountId(userId, body.accountId)).toString()
 
     t.set(body)
     await t.save()
@@ -244,8 +279,11 @@ router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const userId = currentUserId(req)
-    const result = await Transaction.deleteOne({ _id: parseId(req.params.id), userId })
-    if (result.deletedCount === 0) throw notFound('Transação não encontrada')
+    const t = await Transaction.findOne({ _id: parseId(req.params.id), userId }, { transferId: 1 }).lean()
+    if (!t) throw notFound('Transação não encontrada')
+    // Excluir uma perna da transferência exclui as duas
+    if (t.transferId) await Transaction.deleteMany({ userId, transferId: t.transferId })
+    else await Transaction.deleteOne({ _id: t._id })
     res.json({ success: true, message: 'Transação removida.' })
   })
 )
