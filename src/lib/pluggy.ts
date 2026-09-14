@@ -47,13 +47,17 @@ export function pluggyConfigured(): boolean {
   return Boolean(e.PLUGGY_CLIENT_ID && e.PLUGGY_CLIENT_SECRET)
 }
 
+/** Aceita e-mails separados por vírgula, ponto e vírgula ou espaço, com ou sem aspas. */
+export function parseAllowedEmails(value: string): string[] {
+  return value
+    .split(/[,;\s]+/)
+    .map((e) => e.trim().replace(/^["']+|["']+$/g, '').toLowerCase())
+    .filter((e) => e.includes('@'))
+}
+
 export function pluggyAllowedFor(email: string | undefined | null): boolean {
   if (!pluggyConfigured() || !email) return false
-  const allowed = env()
-    .PLUGGY_ALLOWED_EMAILS.split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean)
-  return allowed.includes(email.toLowerCase())
+  return parseAllowedEmails(env().PLUGGY_ALLOWED_EMAILS).includes(email.trim().toLowerCase())
 }
 
 let cachedKey: { value: string; expiresAt: number } | null = null

@@ -44,7 +44,13 @@ router.get(
   asyncHandler(async (req, res) => {
     res.json({
       success: true,
-      data: { enabled: pluggyConfigured(), allowed: pluggyAllowedFor(req.user?.email), connectorId: MEU_PLUGGY_CONNECTOR_ID },
+      data: {
+        enabled: pluggyConfigured(),
+        allowed: pluggyAllowedFor(req.user?.email),
+        connectorId: MEU_PLUGGY_CONNECTOR_ID,
+        // Ajuda a conferir o valor de PLUGGY_ALLOWED_EMAILS (é o e-mail do próprio usuário logado)
+        email: req.user?.email ?? null,
+      },
     })
   })
 )

@@ -180,3 +180,12 @@ describe('conexão bancária (Pluggy)', () => {
     await request(ctx.app).post('/api/webhooks/pluggy').send({ event: 'item/updated', itemId: 'desconhecido' }).expect(200)
   })
 })
+
+describe('e-mails autorizados', () => {
+  it('aceita aspas, espaços e outros separadores', async () => {
+    const { parseAllowedEmails } = await import('../src/lib/pluggy')
+    expect(parseAllowedEmails('"Almir@Gmail.com"')).toEqual(['almir@gmail.com'])
+    expect(parseAllowedEmails(" a@x.com ; 'b@y.com' ,c@z.com\n")).toEqual(['a@x.com', 'b@y.com', 'c@z.com'])
+    expect(parseAllowedEmails('')).toEqual([])
+  })
+})
