@@ -11,6 +11,14 @@ const schema = z.object({
   FRONTEND_URL: z.string().default('http://localhost:3000'),
   // Segredo que a Vercel envia nas chamadas de cron (sem ele o endpoint fica desativado)
   CRON_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
+  // Open Finance via Pluggy (sem as credenciais a integração fica desativada)
+  PLUGGY_CLIENT_ID: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  PLUGGY_CLIENT_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  PLUGGY_API_URL: z.string().url().default('https://api.pluggy.ai'),
+  // Meu Pluggy (gratuito) só permite contas do próprio titular: e-mails autorizados, separados por vírgula
+  PLUGGY_ALLOWED_EMAILS: z.string().default(''),
+  // URL pública da API (HTTPS), usada para registrar o webhook da Pluggy
+  API_PUBLIC_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Login sem Google, apenas para desenvolvimento local
   ALLOW_DEV_LOGIN: z
     .enum(['true', 'false'])

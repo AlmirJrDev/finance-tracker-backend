@@ -19,6 +19,7 @@ import recurringRoutes from './routes/recurring'
 import summaryRoutes from './routes/summary'
 import budgetRoutes from './routes/budgets'
 import accountRoutes from './routes/accounts'
+import connectionRoutes, { webhookRouter } from './routes/connections'
 import cronRoutes from './routes/cron'
 
 const normalizeOrigin = (o: string) => o.trim().replace(/\/+$/, '').toLowerCase()
@@ -86,6 +87,8 @@ export function createApp() {
   app.use('/api/summary', authenticate, summaryRoutes)
   app.use('/api/budgets', authenticate, trackActivity, budgetRoutes)
   app.use('/api/accounts', authenticate, trackActivity, accountRoutes)
+  app.use('/api/connections', authenticate, trackActivity, connectionRoutes)
+  app.use('/api/webhooks', webhookRouter)
   app.use('/api/cron', cronRoutes)
 
   app.use((_req, res) => {

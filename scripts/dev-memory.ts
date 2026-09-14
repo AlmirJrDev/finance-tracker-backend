@@ -4,12 +4,21 @@
  *
  *   npm run dev:memory
  *
- * Não lê o .env de propósito: ele pode ter credenciais de produção
+ * Não carrega o .env de propósito: ele pode ter credenciais de produção
  * (banco, JWT_SECRET, CRON_SECRET) que nunca devem ser usadas localmente.
+ * Só as credenciais da Pluggy são aproveitadas, para testar a conexão bancária.
  */
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { parse } from 'dotenv'
 import { MongoMemoryServer } from 'mongodb-memory-server'
+
+function pluggyFromDotenv(): Record<string, string> {
+  const file = path.resolve(__dirname, '../.env')
+  if (!existsSync(file)) return {}
+  const values = parse(readFileSync(file))
+  return Object.fromEntries(Object.entries(values).filter(([k]) => ['PLUGGY_CLIENT_ID', 'PLUGGY_CLIENT_SECRET'].includes(k)))
+}
 
 async function main() {
   const dbPath = path.resolve(__dirname, '../.data/mongo')
@@ -28,6 +37,8 @@ async function main() {
     ALLOW_DEV_LOGIN: 'true',
     GOOGLE_CLIENT_ID: '',
     CRON_SECRET: 'cron-secret-somente-local',
+    ...pluggyFromDotenv(),
+    PLUGGY_ALLOWED_EMAILS: process.env.DEV_PLUGGY_EMAIL ?? 'almir@local.test',
   })
 
   const { createApp } = await import('../src/app')

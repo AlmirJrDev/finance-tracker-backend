@@ -10,6 +10,10 @@ export default defineConfig({
       GOOGLE_CLIENT_ID: 'test-client-id',
       ALLOW_DEV_LOGIN: 'true',
       CRON_SECRET: 'cron-secret-de-teste-123',
+      // A API da Pluggy é simulada nos testes (pluggyApi), nada é chamado de verdade
+      PLUGGY_CLIENT_ID: 'pluggy-client-teste',
+      PLUGGY_CLIENT_SECRET: 'pluggy-secret-teste',
+      PLUGGY_ALLOWED_EMAILS: 'ana@test.com',
     },
     fileParallelism: false,
     testTimeout: 30_000,

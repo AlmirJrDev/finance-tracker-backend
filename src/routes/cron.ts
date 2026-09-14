@@ -4,6 +4,9 @@ import { env } from '../config/env'
 import { User } from '../models/User'
 import { RecurringTransaction } from '../models/RecurringTransaction'
 import { applyRecurring, confirmDueOccurrences } from '../services/recurrence'
+import { BankConnection } from '../models/BankConnection'
+import { syncConnection } from '../services/bank-sync'
+import { pluggyConfigured } from '../lib/pluggy'
 import { addMonths, todayIn } from '../lib/dates'
 import { AppError } from '../lib/errors'
 import { asyncHandler } from '../lib/http'
@@ -53,8 +56,25 @@ router.get(
       }
     }
 
-    logger.info('Cron de recorrências concluído', { users: users.length, created, confirmed, failures: failures.length })
-    res.json({ success: true, data: { users: users.length, created, confirmed, failures: failures.length } })
+    // Conexões bancárias sem sincronizar há mais de 20h (complementa os webhooks)
+    let synced = 0
+    if (pluggyConfigured()) {
+      const stale = await BankConnection.find(
+        { $or: [{ lastSyncAt: { $exists: false } }, { lastSyncAt: { $lt: new Date(Date.now() - 20 * 3600 * 1000) } }] },
+        { _id: 1 }
+      ).lean()
+      for (const c of stale) {
+        try {
+          await syncConnection(c._id)
+          synced++
+        } catch {
+          failures.push(String(c._id))
+        }
+      }
+    }
+
+    logger.info('Cron de recorrências concluído', { users: users.length, created, confirmed, synced, failures: failures.length })
+    res.json({ success: true, data: { users: users.length, created, confirmed, synced, failures: failures.length } })
   })
 )
 

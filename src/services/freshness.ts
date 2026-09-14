@@ -1,6 +1,7 @@
 import { Types } from 'mongoose'
 import { Transaction } from '../models/Transaction'
 import { User } from '../models/User'
+import { BankConnection } from '../models/BankConnection'
 
 /** A partir de quantos dias sem lançar os dados são considerados parados */
 export const STALE_AFTER_DAYS = 14
@@ -14,7 +15,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
  */
 export async function getFreshness(userId: string, now = new Date()) {
   const uid = new Types.ObjectId(userId)
-  const [user, lastManual, transactionCount] = await Promise.all([
+  const [user, lastManual, transactionCount, lastBankSync] = await Promise.all([
     User.findById(uid, { lastActivityAt: 1 }).lean(),
     Transaction.findOne(
       { userId: uid, recurringId: null, kind: { $ne: 'adjustment' }, 'external.id': { $exists: false } },
@@ -23,9 +24,11 @@ export async function getFreshness(userId: string, now = new Date()) {
       .sort({ createdAt: -1 })
       .lean(),
     Transaction.countDocuments({ userId: uid }),
+    // Com o banco sincronizando sozinho, os dados não ficam parados mesmo sem lançar à mão
+    BankConnection.findOne({ userId: uid, lastSyncError: null }, { lastSyncAt: 1 }).sort({ lastSyncAt: -1 }).lean(),
   ])
 
-  const candidates = [user?.lastActivityAt, lastManual?.createdAt].filter((d): d is Date => Boolean(d)).map((d) => new Date(d))
+  const candidates = [user?.lastActivityAt, lastManual?.createdAt, lastBankSync?.lastSyncAt].filter((d): d is Date => Boolean(d)).map((d) => new Date(d))
   const lastActivityAt = candidates.length ? new Date(Math.max(...candidates.map((d) => d.getTime()))) : null
   const daysSinceActivity = lastActivityAt ? Math.floor((now.getTime() - lastActivityAt.getTime()) / DAY_MS) : null
 
